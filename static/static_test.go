@@ -167,6 +167,20 @@ func TestContentTypeIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestFontContentType(t *testing.T) {
+	// The standard library has no MIME entry for web fonts; the package fills
+	// that gap so they aren't served as application/octet-stream.
+	s := newServer(t, fstest.MapFS{
+		"fonts/inter.woff2": {Data: bytes.Repeat([]byte{0}, 2048)},
+	})
+
+	rec := get(s, http.MethodGet, "/fonts/inter.woff2", nil)
+
+	if ct := rec.Header().Get("Content-Type"); ct != "font/woff2" {
+		t.Errorf("Content-Type = %q, want font/woff2", ct)
+	}
+}
+
 func TestReloadReflectsEdits(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "estilos.css")

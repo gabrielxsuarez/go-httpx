@@ -207,25 +207,12 @@ func compress(b []byte) []byte {
 	return bytes.Clone(buf.Bytes())
 }
 
-// webTypes pins the common web extensions to deterministic values, because
-// mime.TypeByExtension consults the OS (the Windows registry, notably) and can
-// return surprising results for .js or .css from one machine to another.
-var webTypes = map[string]string{
-	".html":  "text/html; charset=utf-8",
-	".css":   "text/css; charset=utf-8",
-	".js":    "text/javascript; charset=utf-8",
-	".mjs":   "text/javascript; charset=utf-8",
-	".json":  "application/json; charset=utf-8",
-	".map":   "application/json; charset=utf-8",
-	".svg":   "image/svg+xml",
-	".xml":   "application/xml",
-	".txt":   "text/plain; charset=utf-8",
-	".ico":   "image/x-icon",
-	".png":   "image/png",
-	".jpg":   "image/jpeg",
-	".jpeg":  "image/jpeg",
-	".webp":  "image/webp",
-	".gif":   "image/gif",
+// fontTypes covers the web font extensions that mime.TypeByExtension has no
+// entry for. The common web types (html, css, js, json, svg, images…) come from
+// the standard library: its builtin types are correct and modern Go keeps them
+// even when the OS registry or mime.types disagrees, so they don't need pinning
+// here. Fonts are the only gap, and without these they'd fall to octet-stream.
+var fontTypes = map[string]string{
 	".woff":  "font/woff",
 	".woff2": "font/woff2",
 	".ttf":   "font/ttf",
@@ -234,10 +221,10 @@ var webTypes = map[string]string{
 
 func contentType(name string) string {
 	ext := strings.ToLower(filepath.Ext(name))
-	if ct, ok := webTypes[ext]; ok {
+	if ct := mime.TypeByExtension(ext); ct != "" {
 		return ct
 	}
-	if ct := mime.TypeByExtension(ext); ct != "" {
+	if ct := fontTypes[ext]; ct != "" {
 		return ct
 	}
 	return "application/octet-stream"
