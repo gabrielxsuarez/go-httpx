@@ -14,6 +14,7 @@ only what you need.
 | [`log`](./log) | Named, asynchronous JSON loggers (`log/slog`) over caller-supplied sinks. |
 | [`recover`](./recover) | Middleware: turns a handler panic into a 500 plus a structured log line. |
 | [`requestlog`](./requestlog) | Middleware: one structured access-log line per request, level by status. |
+| [`view`](./view) | Renders HTML pages over a shared layout, with optional ETag/304 + gzip output cache. |
 
 Planned (not yet implemented): session helpers — added only where a thin wrapper
 earns its place over using the upstream library directly.
@@ -128,6 +129,35 @@ h := requestlog.New(logs.Access(),
 Options: `WithSkipPaths(...)`, `WithSkipExt(...)` (replaces `DefaultSkipExt`),
 `WithClientIP(fn)`, `WithRequestID(fn)` (adds a `request_id` field when set).
 Zero dependencies.
+
+## `view`
+
+Renders HTML pages with `html/template` over a shared layout. Each page is
+compiled into its own cloned set, so pages can reuse block names (`head`,
+`content`) without colliding. Templates come from an `fs.FS`, so the same code
+serves them from a mounted volume (`os.DirFS`) or baked into the binary
+(`embed.FS`).
+
+Rendering with a cache key keeps the rendered output in memory with its ETag and
+gzip form: repeat requests are a map lookup plus a conditional `304`, skipping
+the render and the body transfer. Without a key the page is rendered every time
+and served uncompressed. The page is assembled in a pooled buffer first, so a
+template error never emits partial HTML.
+
+```go
+import "github.com/gabrielxsuarez/go-httpx/view"
+
+e, err := view.New(os.DirFS("web"), view.WithReload(developing))
+
+// Static page: cache by name. Variants: include them in the key.
+e.Render(w, r, "about", nil, view.WithCache("about"))
+e.Render(w, r, "home", data, view.WithCache(fmt.Sprintf("home:%t", data.Promo)))
+```
+
+Convention inside the `fs.FS`: `layout.html` (skeleton with `{{block "head" .}}`
+/ `{{block "content" .}}`), `partial/*.html` (shared fragments), `*.html` (one
+page each). Options: `WithReload(bool)`, `WithFuncs(template.FuncMap)`. Zero
+dependencies.
 
 ## License
 
