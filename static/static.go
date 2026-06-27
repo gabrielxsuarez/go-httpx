@@ -219,7 +219,18 @@ var fontTypes = map[string]string{
 	".eot":   "application/vnd.ms-fontobject",
 }
 
+// pathTypes fija el content type de archivos bien conocidos que no tienen
+// extensión para que mime.TypeByExtension la resuelva. La clave es el path
+// relativo dentro del fs.FS. Hoy solo .well-known/traffic-advice, que sin esto
+// se serviría como octet-stream y Chrome no lo interpreta para el prefetch.
+var pathTypes = map[string]string{
+	".well-known/traffic-advice": "application/trafficadvice+json",
+}
+
 func contentType(name string) string {
+	if ct := pathTypes[name]; ct != "" {
+		return ct
+	}
 	ext := strings.ToLower(filepath.Ext(name))
 	if ct := mime.TypeByExtension(ext); ct != "" {
 		return ct

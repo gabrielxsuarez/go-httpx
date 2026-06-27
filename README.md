@@ -11,10 +11,10 @@ only what you need.
 | Package | What it does |
 |---|---|
 | [`static`](./static) | Serves static files from memory with ETag/304 and gzip. |
+| [`log`](./log) | Named, asynchronous JSON loggers (`log/slog`) over caller-supplied sinks. |
 
-Planned (not yet implemented): session helpers and a rotating `slog` handler —
-added only where a thin wrapper earns its place over using the upstream library
-directly.
+Planned (not yet implemented): session helpers — added only where a thin wrapper
+earns its place over using the upstream library directly.
 
 ## `static`
 
@@ -48,6 +48,47 @@ Options:
 Features: strong ETag + conditional `304`, gzip negotiation (only when it
 shrinks the file), deterministic content types, `HEAD` support. Zero
 dependencies — standard library only.
+
+## `log`
+
+Named JSON loggers built on `log/slog`. Each name ("access", "events",
+"warning", "error", or any custom one) gets its own logger backed by an async,
+buffered writer: the caller only formats the line and hands it off; a single
+background goroutine batches the writes behind a `bufio.Writer` and flushes on
+an interval, keeping the write syscall off the hot path.
+
+Where each log goes — and whether it rotates — is injected, so the package keeps
+**zero third-party dependencies**: it writes to any `io.Writer`.
+
+```go
+import "github.com/gabrielxsuarez/go-httpx/log"
+
+// Files on disk, rotated by lumberjack (the dependency lives in the app).
+logs := log.New(func(name string) io.Writer {
+    return &lumberjack.Logger{Filename: "logs/" + name + ".log", MaxSize: 100, MaxBackups: 5, Compress: true}
+}, log.WithApp("my-app"))
+defer logs.Close() // flush on graceful shutdown
+
+logs.Access().LogAttrs(r.Context(), slog.LevelInfo, "request",
+    slog.String("method", r.Method), slog.Int("status", status))
+logs.Event().Info("demo solicitada", "email", email)
+
+// Or everything to stdout, with rotation delegated to the container runtime.
+logs := log.New(func(string) io.Writer { return os.Stdout })
+```
+
+Accessors: `Access()`, `Event()`, `Warning()`, `Error()` (also tees to stderr),
+and `Named(name)` for anything else. Loggers are created lazily, so a sink is
+only opened for a name actually used; returning `nil` disables that name.
+
+Options:
+
+- `WithApp(string)` — value of the `app` attribute on every line.
+- `WithQueueSize(int)` / `WithBufferSize(int)` — channel depth / `bufio` size.
+- `WithFlushInterval(time.Duration)` — how often the buffer is flushed.
+- `WithBlockOnFull(bool)` — block instead of dropping when the queue is full
+  (off by default; dropped lines are counted by `Dropped()`).
+- `WithErrorStderr(bool)` — tee the error logger to stderr (on by default).
 
 ## License
 
