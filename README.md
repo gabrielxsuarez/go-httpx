@@ -13,6 +13,7 @@ only what you need.
 | [`static`](./static) | Serves static files from memory with ETag/304 and gzip. |
 | [`log`](./log) | Named, asynchronous JSON loggers (`log/slog`) over caller-supplied sinks. |
 | [`recover`](./recover) | Middleware: turns a handler panic into a 500 plus a structured log line. |
+| [`requestlog`](./requestlog) | Middleware: one structured access-log line per request, level by status. |
 
 Planned (not yet implemented): session helpers — added only where a thin wrapper
 earns its place over using the upstream library directly.
@@ -105,6 +106,28 @@ import "github.com/gabrielxsuarez/go-httpx/recover"
 h := recover.New(logs.Error())(mux) // outermost, so it also covers other middleware
 http.ListenAndServe(addr, h)
 ```
+
+## `requestlog`
+
+Middleware that writes one structured access-log line per request — method,
+path, status, bytes, duration, client IP — to a caller-supplied `*slog.Logger`,
+at a level that follows the status class (2xx/3xx info, 4xx warn, 5xx error).
+Static-asset extensions (`DefaultSkipExt`) and configured paths are skipped so
+the log stays about pages and API. The response recorder forwards
+`Hijack`/`Flush`/`Unwrap`, so streaming and connection upgrades keep working.
+
+```go
+import "github.com/gabrielxsuarez/go-httpx/requestlog"
+
+h := requestlog.New(logs.Access(),
+    requestlog.WithClientIP(realIP),       // how to derive the client IP
+    requestlog.WithSkipPaths("/health"),   // skip noisy paths
+)(mux)
+```
+
+Options: `WithSkipPaths(...)`, `WithSkipExt(...)` (replaces `DefaultSkipExt`),
+`WithClientIP(fn)`, `WithRequestID(fn)` (adds a `request_id` field when set).
+Zero dependencies.
 
 ## License
 
