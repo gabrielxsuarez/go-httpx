@@ -12,6 +12,7 @@ only what you need.
 |---|---|
 | [`static`](./static) | Serves static files from memory with ETag/304 and gzip. |
 | [`log`](./log) | Named, asynchronous JSON loggers (`log/slog`) over caller-supplied sinks. |
+| [`recover`](./recover) | Middleware: turns a handler panic into a 500 plus a structured log line. |
 
 Planned (not yet implemented): session helpers — added only where a thin wrapper
 earns its place over using the upstream library directly.
@@ -89,6 +90,21 @@ Options:
 - `WithBlockOnFull(bool)` — block instead of dropping when the queue is full
   (off by default; dropped lines are counted by `Dropped()`).
 - `WithErrorStderr(bool)` — tee the error logger to stderr (on by default).
+
+## `recover`
+
+Middleware that recovers a panic from the wrapped handler: instead of `net/http`
+dropping the connection and logging to its default `ErrorLog` (stderr, outside
+the structured logs), it writes a `500` and logs `panic` — with the recovered
+value, method, path and stack — to a caller-supplied `*slog.Logger`.
+`http.ErrAbortHandler` is re-propagated unchanged. Zero dependencies.
+
+```go
+import "github.com/gabrielxsuarez/go-httpx/recover"
+
+h := recover.New(logs.Error())(mux) // outermost, so it also covers other middleware
+http.ListenAndServe(addr, h)
+```
 
 ## License
 
