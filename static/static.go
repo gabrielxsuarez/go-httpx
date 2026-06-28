@@ -47,12 +47,16 @@ const gzipMinSize = 1024
 
 // asset is a single file resolved at startup. gzip is nil when compression
 // doesn't shrink the file (already-compressed formats, tiny files), so the
-// server never holds a useless second copy.
+// server never holds a useless second copy. rawLen/gzipLen hold the
+// Content-Length as a precomputed string so the hot path avoids strconv.Itoa per
+// request (the length is fixed once the asset is built).
 type asset struct {
 	contentType string
 	etag        string
 	raw         []byte
 	gzip        []byte
+	rawLen      string
+	gzipLen     string // "" when gzip == nil
 }
 
 // Server serves a set of assets. With reload off it is read-only after New
@@ -142,11 +146,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body := a.raw
+	length := a.rawLen
 	if a.gzip != nil && acceptsGzip(r) {
 		h.Set("Content-Encoding", "gzip")
 		body = a.gzip
+		length = a.gzipLen
 	}
-	h.Set("Content-Length", strconv.Itoa(len(body)))
+	h.Set("Content-Length", length)
 
 	if r.Method == http.MethodHead {
 		return
@@ -172,12 +178,17 @@ func (s *Server) lookup(name string) *asset {
 // asset is assembled, so transforms added later (e.g. minifying text before
 // hashing and compressing) have one obvious home.
 func newAsset(name string, raw []byte) *asset {
-	return &asset{
+	a := &asset{
 		contentType: contentType(name),
 		etag:        makeETag(raw),
 		raw:         raw,
 		gzip:        compress(raw),
 	}
+	a.rawLen = strconv.Itoa(len(a.raw))
+	if a.gzip != nil {
+		a.gzipLen = strconv.Itoa(len(a.gzip))
+	}
+	return a
 }
 
 // makeETag returns a strong ETag derived from the file's bytes. The same ETag

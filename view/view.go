@@ -62,11 +62,15 @@ var buffers = sync.Pool{New: func() any {
 const maxBufferRetenido = 256 << 10
 
 // entrada is a cached rendered page: body, its gzip form (nil when gzip doesn't
-// pay off) and a strong ETag over the body.
+// pay off) and a strong ETag over the body. bodyLen/gzipLen hold the
+// Content-Length as a precomputed string so the hot path avoids strconv.Itoa per
+// request (the length is fixed once the entry is built).
 type entrada struct {
-	body []byte
-	gzip []byte
-	etag string
+	body    []byte
+	gzip    []byte
+	etag    string
+	bodyLen string
+	gzipLen string // "" when gzip == nil
 }
 
 // Engine compiles and renders the pages of an fs.FS.
@@ -256,7 +260,12 @@ func (e *Engine) construir(page string, data any) (*entrada, error) {
 		return nil, err
 	}
 	body := bytes.Clone(buf.Bytes())
-	return &entrada{body: body, etag: makeETag(body), gzip: compress(body)}, nil
+	ent := &entrada{body: body, etag: makeETag(body), gzip: compress(body)}
+	ent.bodyLen = strconv.Itoa(len(ent.body))
+	if ent.gzip != nil {
+		ent.gzipLen = strconv.Itoa(len(ent.gzip))
+	}
+	return ent, nil
 }
 
 func (e *Engine) cacheGet(key string) *entrada {
@@ -286,11 +295,13 @@ func servir(w http.ResponseWriter, r *http.Request, ent *entrada) {
 	}
 
 	body := ent.body
+	length := ent.bodyLen
 	if ent.gzip != nil && acceptsGzip(r) {
 		h.Set("Content-Encoding", "gzip")
 		body = ent.gzip
+		length = ent.gzipLen
 	}
-	h.Set("Content-Length", strconv.Itoa(len(body)))
+	h.Set("Content-Length", length)
 	if r.Method == http.MethodHead {
 		return
 	}

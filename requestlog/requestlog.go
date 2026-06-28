@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -76,6 +77,15 @@ func WithRequestID(fn func(*http.Request) string) Option {
 	return func(c *config) { c.requestID = fn }
 }
 
+// attrsPool recicla el slice de slog.Attr que el middleware construye por
+// request. slog.Logger.LogAttrs copia los attrs al record interno del log, así
+// que el slice del caller no es retenido y se puede reusar. Cap 8 cubre los 6
+// attrs base + request_id con holgura, evitando realocar en el hot path.
+var attrsPool = sync.Pool{New: func() any {
+	a := make([]slog.Attr, 0, 8)
+	return &a
+}}
+
 // New returns access-log middleware writing to logger.
 func New(logger *slog.Logger, opts ...Option) func(http.Handler) http.Handler {
 	c := &config{
@@ -101,20 +111,23 @@ func New(logger *slog.Logger, opts ...Option) func(http.Handler) http.Handler {
 			rec := &recorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rec, r)
 
-			attrs := []slog.Attr{
+			attrsPtr := attrsPool.Get().(*[]slog.Attr)
+			attrs := append((*attrsPtr)[:0],
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
 				slog.Int("status", rec.status),
 				slog.Int("bytes", rec.bytes),
 				slog.Int64("dur_us", time.Since(inicio).Microseconds()),
 				slog.String("ip", c.clientIP(r)),
-			}
+			)
 			if c.requestID != nil {
 				if id := c.requestID(r); id != "" {
 					attrs = append(attrs, slog.String("request_id", id))
 				}
 			}
 			logger.LogAttrs(r.Context(), levelFor(rec.status), "request", attrs...)
+			*attrsPtr = attrs
+			attrsPool.Put(attrsPtr)
 		})
 	}
 }
