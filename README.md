@@ -15,6 +15,7 @@ only what you need.
 | [`recover`](./recover) | Middleware: turns a handler panic into a 500 plus a structured log line. |
 | [`requestlog`](./requestlog) | Middleware: one structured access-log line per request, level by status. |
 | [`view`](./view) | Renders HTML pages over a shared layout, with optional ETag/304 + gzip output cache. |
+| [`realip`](./realip) | Derives the client IP behind a reverse proxy, gated by a trust policy. |
 
 Planned (not yet implemented): session helpers — added only where a thin wrapper
 earns its place over using the upstream library directly.
@@ -121,7 +122,7 @@ the log stays about pages and API. The response recorder forwards
 import "github.com/gabrielxsuarez/go-httpx/requestlog"
 
 h := requestlog.New(logs.Access(),
-    requestlog.WithClientIP(realIP),       // how to derive the client IP
+    requestlog.WithClientIP(realIP.IP),    // how to derive the client IP
     requestlog.WithSkipPaths("/health"),   // skip noisy paths
 )(mux)
 ```
@@ -129,6 +130,44 @@ h := requestlog.New(logs.Access(),
 Options: `WithSkipPaths(...)`, `WithSkipExt(...)` (replaces `DefaultSkipExt`),
 `WithClientIP(fn)`, `WithRequestID(fn)` (adds a `request_id` field when set).
 Zero dependencies.
+
+## `realip`
+
+Derives the client IP behind a reverse proxy, gated by a trust policy. Without
+a policy, any header is forgeable: a client can send its own `X-Forwarded-For`
+and impersonate anyone. So the default is **never trust headers** — return
+`r.RemoteAddr` — until the caller states, via an option, who is allowed to set
+them (`WithTrustedCIDR` covering the proxy, or `WithTrustAll` for dev).
+
+```go
+import "github.com/gabrielxsuarez/go-httpx/realip"
+
+// Production: trust XFF only from Caddy on the private Docker network.
+realIP := realip.New(realip.WithTrustedCIDR("10.0.0.0/8"))
+
+// Dev / single trusted proxy that already sanitizes XFF.
+realIP := realip.New(realip.WithTrustAll())
+
+// Plug into requestlog (one place reads the IP):
+h := requestlog.New(logs.Access(),
+    requestlog.WithClientIP(realIP.IP),
+)(mux)
+
+// Or run it once as middleware so every downstream reader of r.RemoteAddr
+// (requestlog included) sees the resolved IP without re-wiring WithClientIP:
+h := realIP.Middleware(mux)
+```
+
+Headers consulted are configurable in priority order
+(`WithHeaders`); the first non-empty one whose value parses as an IP wins, and
+for the comma-chain form (`X-Forwarded-For`) the leftmost token is taken as the
+original client. Defaults to `X-Forwarded-For` only — add `X-Real-IP`,
+`CF-Connecting-IP`, `True-Client-IP`, … only when the layer in front actually
+populates them. Options: `WithTrusted(*net.IPNet)`, `WithTrustedCIDR(string)`,
+`WithTrustAll()`, `WithTrustFunc(fn)`, `WithHeaders(...)`. Zero dependencies.
+
+Also note the section in `requestlog` that references `WithClientIP`, which is
+the seam `realip.IP` is written to plug into.
 
 ## `view`
 
